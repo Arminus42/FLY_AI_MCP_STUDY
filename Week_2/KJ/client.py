@@ -36,7 +36,8 @@ class MCPClient:
         # [Task 4] Initialize
         # 힌트: 서버와 기능을 확인하는 메서드
         # ---------------------------------------------------------
-        await self.session.________________________________________
+        await self.session.initialize()
+
         
         # Server Connection Check
         tools = await self.session.list_tools()
@@ -55,7 +56,7 @@ class MCPClient:
                 # [Task 5] Resource Read
                 # 힌트: 리소스 읽기로 "todo://list" 읽기
                 # ---------------------------------------------------------
-                resource = await self.session.________________________________________
+                resource = await self.session.read_resource("todo://list")
                 print("\n[현재 할 일 목록]")
                 print(resource.contents[0].text)
             except Exception as e:
@@ -78,7 +79,7 @@ class MCPClient:
                         # [Task 6] Tool Call
                         # 힌트: "add_todo" 호출 / 인자: arguments={"task": task}
                         # ---------------------------------------------------------
-                        result = await self.session.________________________________________
+                        result = await self.session.call_tool("add_todo", {"task": task})
                         print(f"✅ 결과: {result.content[0].text}")
 
                 elif choice == '2':
@@ -90,7 +91,7 @@ class MCPClient:
                         # [Task 6] Tool Call
                         # 힌트: "delete_todo" 호출 / 인자: arguments={"index": int(idx)}
                         # ---------------------------------------------------------
-                        result = await self.session.________________________________________
+                        result = await self.session.call_tool("delete_todo", {"index": int(idx)})
                         print(f"🗑️ 결과: {result.content[0].text}")
                     else:
                         print("❌ 숫자를 입력해주세요.")

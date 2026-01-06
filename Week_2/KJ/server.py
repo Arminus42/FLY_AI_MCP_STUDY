@@ -7,7 +7,7 @@ import asyncio
 # [Task 1] FastMCP 서버 인스턴스 초기화
 # 힌트: FasMCP 사용
 # ---------------------------------------------------------
-mcp = ____________________
+mcp = FastMCP("todo")
 
 # Data File Path
 DATA_FILE = Path(__file__).parent / "todo.txt"
@@ -28,7 +28,7 @@ def _save_todos(todos):
 # [Task 2] Resource 등록
 # 힌트: 클라이언트가 "todo://list" 라는 주소(URI)로 데이터를 읽어야 함
 # ---------------------------------------------------------
-@____________________
+@mcp.resource("todo://list")
 def get_todo_list() -> str:
     """현재 저장된 모든 할 일 목록을 반환합니다."""
     todos = _read_todos()
@@ -42,7 +42,7 @@ def get_todo_list() -> str:
 # [Task 3] Tool 등록
 # 힌트: 상태 변경 함수는 Write가 필요하므로 Resource가 아니라 Tool로 등록해야 함
 # ---------------------------------------------------------
-@____________________
+@mcp.tool()
 async def add_todo(task: str) -> str:
     """새로운 할 일을 추가합니다.
     
@@ -58,7 +58,7 @@ async def add_todo(task: str) -> str:
 # [Task 3] Tool 등록
 # 힌트: 상태 변경 함수는 Write가 필요하므로 Resource가 아니라 Tool로 등록해야 함
 # ---------------------------------------------------------
-@____________________
+@mcp.tool()
 async def delete_todo(index: int) -> str:
     """번호를 기준으로 할 일을 삭제합니다.
     
