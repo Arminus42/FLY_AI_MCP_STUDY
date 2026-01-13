@@ -3,4 +3,3 @@ pytest
 coverage
 numpy
 openai
-re
