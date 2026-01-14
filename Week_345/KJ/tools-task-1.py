@@ -46,8 +46,12 @@ def read_file() -> str:
     Read the contents of a Python file in the target directory to generate tests for.
     """
     file_path = CONFIG['target_file']
+    if not file_path.startswith(TARGET_DIR):
+        return f"Error: Access denied. You can only read files within {TARGET_DIR}"
+
     with open(file_path, "r") as f:
-        return f.read()
+        content = f.read()
+        return content
 
 @mcp.tool()
 def write_file(file_path: str, content: str) -> str:
@@ -61,11 +65,11 @@ def write_file(file_path: str, content: str) -> str:
     if not file_path.startswith(TARGET_DIR):
         return f"Error: Access denied. You can only write files within {TARGET_DIR}"
 
-    # timestamp = time.strftime("%Y%m%d%H%M%S")
-    # base_dir = "/".join(file_path.split('/')[:-2])
-    # os.makedirs(os.path.join(base_dir, f"results_{timestamp}"), exist_ok=True)
-    # file_path = os.path.join(base_dir, f"results_{timestamp}", os.path.basename(file_path))
-    # logging.info(f"Writing to {file_path}")
+    timestamp = time.strftime("%Y%m%d%H%M%S")
+    base_dir = "/".join(file_path.split('/')[:-3])
+    os.makedirs(os.path.join(base_dir, f"results_{timestamp}"), exist_ok=True)
+    file_path = os.path.join(base_dir, f"results_{timestamp}", os.path.basename(file_path))
+    logging.info(f"Writing to {file_path}")
 
     try:
         with open(file_path, "w") as f:
