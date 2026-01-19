@@ -15,6 +15,15 @@ mcp = FastMCP("tools-task-1")
 PYTHON_PATH = "/usr/bin/python"
 TARGET_DIR = os.path.join(os.path.dirname(__file__), "targets")
 
+def _get_secure_path(OBJECT_DIR: str, file_path: str) -> str:
+    full_path = os.path.abspath(os.path.join(OBJECT_DIR, file_path))
+    
+    if not full_path.startswith(OBJECT_DIR):
+        raise ValueError(f"Access denied: {file_path} is outside the target directory.")
+    
+    return full_path
+
+
 @mcp.tool()
 def list_files() -> str:
     """

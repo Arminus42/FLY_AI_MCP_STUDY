@@ -25,11 +25,8 @@ def list_files() -> str:
     if not os.path.exists(TARGET_DIR):
         return "Error: Target directory does not exist."
     
-    # 2. Get all .py files in that directory
-    # Using glob to find patterns like *.py
     files = glob.glob(os.path.join(TARGET_DIR, "**", "*.py"), recursive=True)
     
-    # 3. Clean up the list (usually just sending filenames is cleaner for the LLM)
     relpaths = [os.path.relpath(f, TARGET_DIR) for f in files]
     
     # 4. Return as a string
