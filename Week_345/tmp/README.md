@@ -1,3 +1,8 @@
+### Comment
+- task.zip를 다운받아서 로컬에서 진행하시면 됩니다. 나머지 파일들과 같은 파일입니다.
+- Assignment Skeleton Code는 OpenAI로 되어 있어 API Key가 필요합니다. 
+- 유료 OpenAI API Key를 사용하시거나 (과제에서는 2$ 지급되었지만, 시행착오가 적다면 1$로도 충분합니다), Skeleton Code를 Gemini 사용 버전으로 변경하셔야 합니다.
+  
 # CS454 Assignment 5: MCP Python Testing Automation Agent
 
 The aim of this assignment is to implement MCP tools and client for automation of testing for a subset of Python. To achieve this, you first need to make the agent read the target `.py` file, and then make it generate inputs for functions in the file in the format of pytest unit test cases. The agent should also automatically run `pytest` and measure statement coverage.
