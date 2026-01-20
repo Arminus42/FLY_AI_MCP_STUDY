@@ -16,7 +16,7 @@ from openai.types.shared_params.function_definition import FunctionDefinition
 
 load_dotenv(override=True)
 
-MAX_RETRIES = 20
+MAX_RETRIES = 15
 TARGET_COVERAGE = 100 
 
 class MCPClient:
@@ -38,12 +38,53 @@ class MCPClient:
         await self.exit_stack.aclose()
 
     async def execute_tool(self, tool_name, tool_args):
-        print(f"  🛠️  [Tool Executing] {tool_name}...")
-        
+        print(f"  🛠️  {tool_name}...", end="\r")
         result = await self.session.call_tool(tool_name, tool_args)
-        
+        print(f"  ✅ {tool_name} Done.    ") 
         output = result.content[0].text if result.content else ""
         return output
+
+    def _parse_feedback(self, run_output, cov_output, current_score):
+        feedback_points = []
+
+        if "SyntaxError" in run_output or "IndentationError" in run_output:
+            return "CRITICAL_SYNTAX_ERROR"
+
+        runtime_errors = re.findall(r"E\s+(\w+Error):.+", run_output)
+        runtime_errors = [e for e in runtime_errors if "Assertion" not in e]
+        if runtime_errors:
+            feedback_points.append(f"🔥 **RUNTIME CRASH DETECTED ({runtime_errors[0]})**:")
+            feedback_points.append("- **ACTION**: Check inputs. Fix the crash first.")
+            feedback_points.append(f"- Log:\n{run_output[-500:]}")
+            return "\n".join(feedback_points)
+
+        failures = re.findall(r"(E\s+assert.+)", run_output)
+        if failures:
+            feedback_points.append("❌ **ASSERTION FAILURE**:")
+            for f in failures:
+                feedback_points.append(f"- `{f}`")
+            feedback_points.append("-> **ACTION**: TRUST THE CODE. Update test expectation.")
+
+
+        if current_score > 0:
+            missing_lines = []
+            for line in cov_output.splitlines():
+                if re.search(r"\.py\s+\d+", line):
+                    parts = line.split()
+                    if len(parts) >= 5 and "%" in parts[-2]:
+                        missing_str = parts[-1]
+                        if missing_str != "": missing_lines.append(missing_str)
+
+            if missing_lines:
+                feedback_points.append(f"🎯 **MISSING COVERAGE**: Lines `{', '.join(missing_lines)}`.")
+        
+        elif current_score == 0:
+            return "ZERO_COVERAGE_ERROR"
+
+        if not feedback_points:
+            return f"Pytest Result:\n{run_output[-500:]}"
+        
+        return "\n".join(feedback_points)
 
     async def process_single_file(self, target_file_path: str, result_dir: str):
         target_filename = os.path.basename(target_file_path)
@@ -57,23 +98,25 @@ class MCPClient:
         
         target_content = await self.execute_tool('read_file', {'file_path': target_file_path})
 
+        system_instruction = (
+            "You are a Surgical Python QA Engineer. Goal: 100% Coverage.\n"
+            "STRATEGY:\n"
+            "1. **CRASHES FIRST**: Fix crashes immediately.\n"
+            "2. **ASSERTION FAILURES**: If `assert` fails, TRUST THE CODE. Update expected value.\n"
+            "3. **MISSING LINES**: Only add tests for specified lines.\n"
+            "4. **NO HALLUCINATIONS**: Do not copy source code."
+        )
+
         messages = [
-            {"role": "system", "content": (
-                "You are an expert Python QA Engineer. Your goal is 100% Coverage.\n"
-                "RULES:\n"
-                f"1. Import `{module_name}` directly.\n"
-                "2. TRUST THE CODE: If `assert` fails, update your test expectation.\n"
-                "3. MISSING LINES: Pay attention to the `Missing` lines in the report.\n"
-                "4. DO NOT COPY original source code into test file.\n"
-                "5. Fix SyntaxErrors immediately."
-            )},
-            {"role": "user", "content": f"Target Code (`{target_filename}`):\n```python\n{target_content}\n```\nWrite `{test_filename}`."}
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": f"Target Source Code (`{target_filename}`):\n```python\n{target_content}\n```\n\nTask: Write `{test_filename}` to achieve 100% coverage."}
         ]
         
         current_best = 0
+        best_code_content = ""
         
         for attempt in range(1, MAX_RETRIES + 1):
-            print(f"\n[Attempt {attempt}/{MAX_RETRIES}] Generating test...")
+            print(f"\n[Attempt {attempt}/{MAX_RETRIES}] Thinking...")
 
             tool_schema = await self.session.list_tools()
             openai_tools = [ChatCompletionToolParam(type="function", function=FunctionDefinition(name=t.name, description=t.description, parameters=t.inputSchema)) for t in tool_schema.tools]
@@ -110,9 +153,11 @@ class MCPClient:
                 print(f"  📈 Score: {score}% (New Best!)")
                 current_best = score
                 self.best_results[module_name] = score
+                
+                best_code_content = await self.execute_tool('read_file', {'file_path': test_file_path})
+                
                 best_path = f"best_coverages/{test_filename}"
-                content = await self.execute_tool('read_file', {'file_path': test_file_path})
-                await self.execute_tool('write_file', {'file_path': best_path, 'content': content})
+                await self.execute_tool('write_file', {'file_path': best_path, 'content': best_code_content})
             else:
                 print(f"  📉 Score: {score}%")
 
@@ -120,12 +165,28 @@ class MCPClient:
                 print(f"  🎉 SUCCESS! 100% Coverage.")
                 break
 
-            feedback = (
-                f"Coverage Report:\n{cov_output}\n\n"
-                f"Pytest Output:\n{run_output[:1000]}\n"
-                "Analyze the 'Missing' lines in the report and add tests."
+            parsed_feedback = self._parse_feedback(run_output, cov_output, score)
+        
+            if (parsed_feedback == "CRITICAL_SYNTAX_ERROR" or parsed_feedback == "ZERO_COVERAGE_ERROR") and current_best > 0:
+                print(f"  ⚠️ [ROLLBACK] Reverting to last best code ({current_best}%)...")
+
+                await self.execute_tool('write_file', {'file_path': test_file_path, 'content': best_code_content})
+
+                rollback_msg = (
+                    f"⚠️ **ROLLBACK TRIGGERED**: Your last edit caused a Syntax Error or 0% coverage.\n"
+                    f"I have reverted the file to the version with {current_best}% coverage.\n"
+                    "**INSTRUCTION**: Try again. Do NOT make the same mistake. Check your syntax carefully."
+                )
+                messages.append({"role": "user", "content": rollback_msg})
+                continue
+
+            final_feedback = (
+                f"Current Score: {score}%\n\n"
+                f"{parsed_feedback}\n\n"
+                "INSTRUCTION: Fix the failures or add missing tests."
             )
-            messages.append({"role": "user", "content": feedback})
+            print(f"  🤖 Feedback: {parsed_feedback.splitlines()[0] if parsed_feedback else 'None'} ...")
+            messages.append({"role": "user", "content": final_feedback})
 
     async def run_task2(self):
         files_str = await self.execute_tool('list_files', {})
@@ -133,7 +194,6 @@ class MCPClient:
             target_files = eval(files_str)
         except:
             target_files = []
-            print(f"Error parsing file list: {files_str}")
         
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         result_dir = f"task2_results_{timestamp}"
