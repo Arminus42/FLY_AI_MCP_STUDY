@@ -48,15 +48,6 @@ def _run_subprocess_with_env(cmd, target_file_path=None):
         cwd=BASE_DIR
     )
 
-def _get_secure_path(OBJECT_DIR: str, file_path: str) -> str:
-    full_path = os.path.abspath(os.path.join(OBJECT_DIR, file_path))
-    
-    if not full_path.startswith(OBJECT_DIR):
-        raise ValueError(f"Access denied: {file_path} is outside the target directory.")
-    
-    return full_path
-
-
 @mcp.tool()
 def list_files() -> str:
     files = []
