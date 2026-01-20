@@ -16,13 +16,13 @@ from example1 import *
 def test_smoke_import():
     assert hasattr(example1, "__doc__") or True
 
-def test_foo():
-    assert foo(42, 0) == 1  # Tests coverage of lines 2, 3, 4
-    assert foo(42, 1) == 0  # Tests coverage of line 7
-    assert foo(1, 0) == -1   # Tests coverage of lines 9-10
+def test_cover_all_branches_example1():
+    # foo branches
+    assert foo(42, 0) == 1          # x==42, y==0
+    assert foo(42, 7) == 0          # x==42, y!=0
+    assert foo(41, 0) == -1         # x!=42
 
-
-def test_bar():
-    assert bar(4, 2, 3) == 3     # Tests coverage of line 13
-    assert bar(6, 2, 4) == 6     # Tests coverage of line 15
-    assert bar(2, 4, 3) == 4     # Tests coverage of line 18
+    # bar branches
+    assert bar(10, 10, 5) == 5      # (x+y)/2 > z => return z
+    assert bar(9, 0, 5) == 9        # (x+y)/3 < z and x>y => return x
+    assert bar(1, 5, 10) == 5       # else => return y

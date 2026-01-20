@@ -19,6 +19,15 @@ from openai.types.shared_params.function_definition import FunctionDefinition
 
 load_dotenv()
 
+SYSTEM_PROMPT = """
+You are an elite QA Automation Engineer. 
+Your goal is to achieve 100% test coverage.
+Always analyze the provided code context carefully before writing tests.
+Do not use any other packages than pytest.
+Do not use classes.
+However, always write tests so that they are function of a series of asserts.
+"""
+
 # --- Logging Helpers ---
 def log_tool_call(name, args):
     print(f"\n\033[94m[LLM-DECISION] Calling Tool: {name}\033[0m")
@@ -65,7 +74,7 @@ class MCPClient:
         )) for t in response.tools]
 
         response = self.llm.chat.completions.create(
-            model="gpt-4o-mini", messages=messages, tools=available_tools, tool_choice="auto"
+            model="gpt-5.2", messages=messages, tools=available_tools, tool_choice="auto"
         )
         finish_reason = response.choices[0].finish_reason
 
@@ -102,17 +111,23 @@ class MCPClient:
 
     async def workflow_loop(self):
         log_step("Phase 1: Initialization")
-        self.messages = [{"role": "user", "content": "Call init_queue() to start."}]
+        self.messages = [
+            {"role": "system", "content": SYSTEM_PROMPT },
+            {"role": "user", "content": "Call init_queue() to start."}
+        ]
         self.messages = await self.process_messages(self.messages)
 
         # MAIN LOOP: Iterate over files
         while True:
             # --- PHASE 2: Fetch Task ---
             # We clear messages here to ensure a fresh context for each file
-            self.messages = [] 
+            self.messages = [
+                {"role": "system", "content": SYSTEM_PROMPT },
+                {"role": "user", "content": "Call next_task() to start."}
+            ] 
             log_step("Phase 2: Fetching Task")
             
-            self.messages = [{"role": "user", "content": "Call next_task(). If 'QUEUE_EMPTY', reply 'FINISHED'. Else summarize code."}]
+            self.messages = [{"role": "user", "content": "If 'QUEUE_EMPTY', reply 'FINISHED'. Else summarize code."}]
             self.messages = await self.process_messages(self.messages)
             
             # Check for FINISHED signal

@@ -16,15 +16,9 @@ from example4 import *
 def test_smoke_import():
     assert hasattr(example4, "__doc__") or True
 
-def test_choose_num_all_branches():
-    # x > y
-    assert choose_num(5, 4) == -1
-
-    # y even (and x<=y)
-    assert choose_num(3, 10) == 10
-
-    # y odd and x==y -> no even in range
-    assert choose_num(5, 5) == -1
-
-    # y odd and x<y -> returns y-1 (largest even <= y)
-    assert choose_num(3, 9) == 8
+def test_choose_num():
+    assert choose_num(1, 10) == 10  # Highest even in range
+    assert choose_num(1, 11) == 10  # Highest even in range
+    assert choose_num(10, 20) == 20  # Highest even in range
+    assert choose_num(5, 5) == -1  # Single number range, odd
+    assert choose_num(10, 9) == -1  # Invalid range

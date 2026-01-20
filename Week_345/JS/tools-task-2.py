@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple
 from mcp.server.fastmcp import FastMCP
 
 # --- LOGGING CONFIGURATION ---
-# We configure logging to write to stderr so it doesn't break the MCP JSON-RPC on stdout.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [SERVER] %(message)s",
@@ -24,13 +23,10 @@ mcp = FastMCP("tools-task-2")
 # Robust absolute paths
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 TARGET_DIR = os.path.join(PROJECT_ROOT, "targets")
+BEST_DIR = os.path.join(PROJECT_ROOT, "best_coverages")
 
 # --- Helper: Sanitize LLM Output ---
 def _sanitize_test_code(code: str) -> str:
-    """
-    Strips top-level imports and whitespace from LLM output.
-    This ensures we only append the test function, not duplicate headers.
-    """
     lines = code.split('\n')
     filtered = []
     for line in lines:
@@ -181,7 +177,7 @@ class GlobalState:
     coverage_pct: int = 0
     missing_lines: List[int] = field(default_factory=list)
     results_dir: Optional[str] = None
-    best_dir: str = field(default_factory=lambda: os.path.join(PROJECT_ROOT, "best_coverages"))
+    best_dir: str = field(default_factory=lambda: BEST_DIR)
     coverages: Dict[str, int] = field(default_factory=dict)
 
 STATE = GlobalState()
@@ -189,28 +185,44 @@ STATE = GlobalState()
 def _ensure_dirs():
     os.makedirs(STATE.best_dir, exist_ok=True)
     if STATE.results_dir: os.makedirs(STATE.results_dir, exist_ok=True)
+
 def _write_coverages_json():
     os.makedirs(STATE.best_dir, exist_ok=True)
-    with open(os.path.join(STATE.best_dir, "coverages.json"), "w") as f:
-        json.dump(STATE.coverages, f, indent=2)
+    out_path = os.path.join(STATE.best_dir, "coverages.json")
+    try:
+        with open(out_path, "w") as f:
+            json.dump(STATE.coverages, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to write coverages.json: {e}")
 
-# --- MCP TOOLS WITH LOGGING ---
+# --- MCP TOOLS ---
 
 @mcp.tool()
 def init_queue() -> str:
     logger.info("Function 'init_queue' called.")
     global STATE
+    
+    # 1. Preserve existing coverages if possible
+    existing_coverages = {}
+    cov_file = os.path.join(BEST_DIR, "coverages.json")
+    if os.path.exists(cov_file):
+        try:
+            with open(cov_file, "r") as f:
+                existing_coverages = json.load(f)
+            logger.info(f"Loaded existing coverages: {existing_coverages}")
+        except:
+            pass
+
     STATE = GlobalState()
+    STATE.coverages = existing_coverages # Restore
+    
     if not os.path.isdir(TARGET_DIR): 
-        logger.error(f"Target dir {TARGET_DIR} not found.")
         return f"Error: {TARGET_DIR} not found."
 
     module_files = sorted(glob.glob(os.path.join(TARGET_DIR, "example*.py")))
     if not module_files:
         module_files = sorted(glob.glob(os.path.join(TARGET_DIR, "example*", "example*.py")))
-    if not module_files: 
-        logger.error("No example*.py files found.")
-        return "Error: No example*.py files found."
+    if not module_files: return "Error: No example*.py files found."
 
     tasks = {}
     for path in module_files:
@@ -227,17 +239,15 @@ def init_queue() -> str:
     STATE.queue = sorted(tasks.keys(), key=lambda s: (len(s), s))
     STATE.results_dir = os.path.join(PROJECT_ROOT, f"task2_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}")
     _ensure_dirs()
+    
+    # Write initial (restored) state
     _write_coverages_json()
 
-    logger.info(f"Queue initialized with {len(STATE.queue)} modules: {STATE.queue}")
     return json.dumps({"status": "initialized", "count": len(STATE.queue), "modules": STATE.queue})
 
 @mcp.tool()
 def next_task() -> str:
-    logger.info("Function 'next_task' called.")
-    if not STATE.queue: 
-        logger.info("Queue is empty. Returning QUEUE_EMPTY.")
-        return "QUEUE_EMPTY"
+    if not STATE.queue: return "QUEUE_EMPTY"
     
     module = STATE.queue.pop(0)
     task = STATE.tasks[module]
@@ -264,34 +274,21 @@ def next_task() -> str:
     if ok:
         STATE.coverage_pct = pct
         STATE.missing_lines = missing
-        logger.info(f"Initial smoke test passed. Coverage: {pct}%")
-    else:
-        logger.warning(f"Initial smoke test failed. Output: {out[:100]}...")
+        # Update map immediately with initial coverage
+        STATE.coverages[module] = pct
+        _write_coverages_json()
 
     with open(task.module_file_abs, "r") as f: code = f.read()
     return f"Target: {task.module_name}\nCoverage: {STATE.coverage_pct}%\nCode:\n{code}"
 
 @mcp.tool()
 def get_current_status() -> str:
-    logger.info("Function 'get_current_status' called.")
     if not STATE.current:
         remaining_count = len(STATE.queue)
-        status_msg = f"IDLE. {remaining_count} items remaining."
-        logger.info(f"Returning status: {status_msg}")
-        
         if remaining_count > 0:
-            return json.dumps({
-                "status": "IDLE", 
-                "message": f"No active task. {remaining_count} items remaining in queue.",
-                "next_action": "Call 'next_task' to proceed."
-            })
-        else:
-            return json.dumps({
-                "status": "COMPLETED", 
-                "message": "All tasks in queue are finished."
-            })
+            return json.dumps({"status": "IDLE", "next_action": "Call 'next_task'."})
+        return json.dumps({"status": "COMPLETED"})
 
-    logger.info(f"Active Task: {STATE.current.module_name}, Cov: {STATE.coverage_pct}%")
     return json.dumps({
         "status": "ACTIVE",
         "module": STATE.current.module_name, 
@@ -301,29 +298,14 @@ def get_current_status() -> str:
 
 @mcp.tool()
 def get_uncovered_context(context: int = 2) -> str:
-    logger.info(f"Function 'get_uncovered_context' called with context={context}")
     if not STATE.current: return "Error: No active task."
-    
     lines = _read_module_source(STATE.current.module_file_abs)
-    result = _format_uncovered_context(lines, STATE.missing_lines, context=context)
-    
-    # 
-    # (Conceptual diagram: we log the size of the result instead)
-    logger.info(f"Returning {len(result)} chars of context context.")
-    return result
+    return _format_uncovered_context(lines, STATE.missing_lines, context=context)
 
 @mcp.tool()
 def submit_test_case(test_code: str) -> str:
-    logger.info("Function 'submit_test_case' called.")
     if not STATE.current: return "Error: No active task."
-    
-    # Log snippet of submitted code for debugging
-    code_preview = test_code.strip().split('\n')[0]
-    logger.info(f"Received code: {code_preview}...")
-
-    if "def test_" not in test_code: 
-        logger.warning("Submission rejected: No 'def test_' found.")
-        return "REJECTED: Must contain 'def test_...'"
+    if "def test_" not in test_code: return "REJECTED: Must contain 'def test_...'"
 
     task = STATE.current
     clean_code = _sanitize_test_code(test_code)
@@ -338,14 +320,16 @@ def submit_test_case(test_code: str) -> str:
     )
 
     if not ok:
-        logger.warning(f"Test Failed. Reverting. Output: {out[:100]}...")
         with open(test_abs, "w") as f: f.write(_assemble_test_file(task.module_name, STATE.accepted_snippets))
         return f"REJECTED: Test failed.\n{out}"
 
-    logger.info(f"Test Accepted! Coverage improved to {pct}%")
     STATE.accepted_snippets.append(clean_code)
     STATE.coverage_pct = pct
     STATE.missing_lines = missing
+    
+    # --- FIX: Save to coverages.json IMMEDIATELY ---
+    STATE.coverages[task.module_name] = pct
+    _write_coverages_json()
     
     with open(os.path.join(STATE.best_dir, f"test_{task.module_name}.py"), "w") as f:
         f.write(_assemble_test_file(task.module_name, STATE.accepted_snippets))
@@ -354,20 +338,17 @@ def submit_test_case(test_code: str) -> str:
 
 @mcp.tool()
 def finalize_task() -> str:
-    logger.info("Function 'finalize_task' called.")
-    if not STATE.current: return "Error: No active task to finalize."
+    if not STATE.current: return "Error: No active task."
     
     module_name = STATE.current.module_name
     pct = STATE.coverage_pct
     
+    # Redundant save just in case
     STATE.coverages[module_name] = pct
     _write_coverages_json()
     
     STATE.current = None
-    remaining = len(STATE.queue)
-    
-    logger.info(f"Finalized '{module_name}' with {pct}%. Remaining in queue: {remaining}")
-    return f"Task '{module_name}' finalized with {pct}% coverage. {remaining} modules remaining in queue. Please call 'next_task'."
+    return f"Task '{module_name}' finalized."
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
