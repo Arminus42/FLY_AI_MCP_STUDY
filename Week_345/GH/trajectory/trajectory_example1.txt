@@ -1,0 +1,14 @@
+[CALL] ts=20260126205220
+ target=example1.py
+ out_dir=/Users/hagahyeong/Documents/MCP_study/task/targets/task3_results_20260126205220
+ elapsed_sec=16.003578
+ status=OK
+ generated_test=/Users/hagahyeong/Documents/MCP_study/task/targets/task3_results_20260126205220/test_example1.py
+
+ [CALL] ts=20260127165911
+ target=example1.py
+ out_dir=/Users/hagahyeong/Documents/MCP_study/task/targets/task3_results_20260127165911
+ elapsed_sec=0.000004
+ status=ERROR
+ error=AttributeError("module 'sbst' has no attribute 'run_sbst'")
+

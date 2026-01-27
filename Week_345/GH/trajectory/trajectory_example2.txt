@@ -1,0 +1,7 @@
+[CALL] ts=20260126205236
+ target=example2.py
+ out_dir=/Users/hagahyeong/Documents/MCP_study/task/targets/task3_results_20260126205236
+ elapsed_sec=2.875224
+ status=OK
+ generated_test=/Users/hagahyeong/Documents/MCP_study/task/targets/task3_results_20260126205236/test_example2.py
+
