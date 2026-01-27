@@ -1,7 +1,7 @@
 import asyncio
 import argparse
 import json
-import sys
+import os
 from typing import Optional
 from contextlib import AsyncExitStack
 
@@ -10,8 +10,6 @@ from mcp.client.stdio import stdio_client
 from openai import OpenAI
 from dotenv import load_dotenv
 from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionMessageToolCallParam,
     ChatCompletionToolMessageParam,
     ChatCompletionToolParam,
 )
@@ -19,38 +17,12 @@ from openai.types.shared_params.function_definition import FunctionDefinition
 
 load_dotenv()
 
-# --- STRATEGY UPDATE: Explicitly tell LLM how to handle multiple functions ---
+# Simplified System Prompt
 SYSTEM_PROMPT = """
-You are an elite QA Automation Engineer. 
-Your goal is to achieve 100% test coverage for Python files.
-
-STRATEGY FOR MULTIPLE FUNCTIONS:
-1. The target file may contain MULTIPLE functions.
-2. Do not try to test everything in one go.
-3. Focus on ONE function at a time.
-4. Once one function is covered, look at the 'missing lines' to find the next function.
-5. Submit a separate test function for the next target.
-
-RULES:
-- Do not use any other packages than pytest.
-- Do not use classes.
-- Always write tests as a series of simple asserts.
-- If a previous test was accepted, assume it is already in the file. DO NOT REPEAT IT.
-- WRITE ONLY THE NEW CODE.
+You are a QA Automation Agent specialized in SBST. 
+Your ONLY task is to call the `run_sbst` tool for the requested example file.
+Do not write code. Do not analyze. Just run the tool.
 """
-
-# --- Logging Helpers ---
-def log_tool_call(name, args):
-    print(f"\n\033[94m[LLM-DECISION] Calling Tool: {name}\033[0m")
-    print(f"\033[94m   Args: {args}\033[0m")
-
-def log_tool_result(name, result):
-    snippet = str(result).replace("\n", "\\n")
-    if len(snippet) > 150: snippet = snippet[:150] + "..."
-    print(f"\033[92m[TOOL-RESULT] {name} -> {snippet}\033[0m")
-
-def log_step(step_name):
-    print(f"\n\033[93m=== {step_name} ===\033[0m")
 
 class MCPClient:
     def __init__(self):
@@ -58,6 +30,7 @@ class MCPClient:
         self.exit_stack = AsyncExitStack()
         self.llm = OpenAI()
         self.messages = []
+        self.trajectory_log = []
 
     async def connect_to_server(self, server_script_path: str):
         print(f"Connecting to server: {server_script_path}...")
@@ -68,131 +41,101 @@ class MCPClient:
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
         
         await self.session.initialize()
-        
-        response = await self.session.list_tools()
-        print("\nConnected to server with tools:", [tool.name for tool in response.tools])
+        print("Connected.")
 
     async def cleanup(self): 
         await self.exit_stack.aclose()
 
+    def log_trajectory(self, role, content):
+        """Accumulate logs for the trajectory file."""
+        entry = f"[{role.upper()}]\n{content}\n"
+        self.trajectory_log.append(entry)
+        
+        # Color output for console
+        if role == "tool_result":
+            print(f"\033[92m{entry.strip()}\033[0m")
+        elif role == "assistant":
+            print(f"\033[94m{entry.strip()}\033[0m")
+        else:
+            print(entry.strip())
+
     async def process_messages(self, messages: list):
         if not self.session:
-            raise RuntimeError("Session not initialized. Call connect_to_server() first.")
+            raise RuntimeError("Session not initialized.")
 
+        # 1. Get Tools
         response = await self.session.list_tools()
         available_tools = [ChatCompletionToolParam(type="function", function=FunctionDefinition(
             name=t.name, description=t.description or "", parameters=t.inputSchema
         )) for t in response.tools]
 
+        # 2. Call LLM
         response = self.llm.chat.completions.create(
             model="gpt-4o-mini", messages=messages, tools=available_tools, tool_choice="auto"
         )
-        finish_reason = response.choices[0].finish_reason
+        msg = response.choices[0].message
 
-        if finish_reason == "stop":
-            content = response.choices[0].message.content
-            print(f"\n[ASSISTANT] {content}")
-            messages.append(ChatCompletionAssistantMessageParam(role="assistant", content=content))
-        elif finish_reason == "tool_calls":
-            tool_calls = response.choices[0].message.tool_calls
-            messages.append(ChatCompletionAssistantMessageParam(
-                role="assistant",
-                tool_calls=[ChatCompletionMessageToolCallParam(
-                    id=tc.id, function=tc.function, type=tc.type
-                ) for tc in tool_calls]
-            ))
-            tasks = []
-            for tc in tool_calls:
-                log_tool_call(tc.function.name, tc.function.arguments)
-                tasks.append(asyncio.create_task(self.process_tool_call(tc)))
-            tool_results = await asyncio.gather(*tasks)
+        # 3. Handle Response
+        if msg.tool_calls:
+            messages.append(msg)
+            tool_names = [tc.function.name for tc in msg.tool_calls]
+            self.log_trajectory("assistant", f"Tool Call: {tool_names}")
+            
+            tool_results = []
+            for tc in msg.tool_calls:
+                try: 
+                    args = json.loads(tc.function.arguments)
+                except: 
+                    args = {}
+                
+                # Execute Tool
+                result = await self.session.call_tool(tc.function.name, args)
+                content = result.content[0].text if result.content else ""
+                
+                tool_results.append(ChatCompletionToolMessageParam(
+                    role="tool", content=content, tool_call_id=tc.id
+                ))
+                self.log_trajectory("tool_result", f"{tc.function.name} -> {content}")
+
             messages.extend(tool_results)
+            # Recursively let LLM confirm
             return await self.process_messages(messages)
-        return messages
+        
+        else:
+            messages.append(msg)
+            self.log_trajectory("assistant", msg.content)
+            return messages
 
-    async def process_tool_call(self, tool_call) -> ChatCompletionToolMessageParam:
-        try: args = json.loads(tool_call.function.arguments)
-        except: args = {}
-        try:
-            res = await self.session.call_tool(tool_call.function.name, args)
-            content = res.content[0].text if res.content else ""
-        except Exception as e: content = f"Error: {e}"
-        log_tool_result(tool_call.function.name, content)
-        return ChatCompletionToolMessageParam(role="tool", content=content, tool_call_id=tool_call.id)
-
-    async def workflow_loop(self):
-        log_step("Phase 1: Initialization")
+    async def run_for_example(self, example_name):
+        print(f"\n\033[1m=== Processing {example_name} ===\033[0m")
+        
+        # Reset logs for this specific file
+        self.trajectory_log = []
         self.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT },
-            {"role": "user", "content": "Call init_queue() to start."}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Run SBST for {example_name}."}
         ]
-        self.messages = await self.process_messages(self.messages)
-
-        while True:
-            # --- PHASE 2: Fetch Task ---
-            self.messages = [
-                {"role": "system", "content": SYSTEM_PROMPT },
-                {"role": "user", "content": "Call next_task() to start."}
-            ] 
-            log_step("Phase 2: Fetching Task")
-            
-            self.messages = [{"role": "user", "content": "If 'QUEUE_EMPTY', reply 'FINISHED'. Else summarize what functions exist in the code."}]
-            self.messages = await self.process_messages(self.messages)
-            
-            last_content = ""
-            if self.messages and self.messages[-1].get('content'):
-                last_content = self.messages[-1]['content']
-
-            if "FINISHED" in last_content or "QUEUE_EMPTY" in last_content:
-                print("All tasks completed.")
-                break
-
-            # --- PHASE 3: Generate Tests (Hill Climbing) ---
-            fails_in_a_row = 0
-            log_step("Phase 3: Generating Tests")
-            
-            while fails_in_a_row < 5: # Increased attempts to handle multiple functions
-                # UPDATED PROMPT: Specific logic for finding the "next" function
-                step_prompt = """
-                1. Call get_current_status().
-                2. If coverage is 100%, reply "DONE".
-                3. Call get_uncovered_context(context=2).
-                4. ANALYZE missing lines:
-                   - If missing lines belong to a new function, write a NEW test function (e.g. test_function_B).
-                   - If missing lines are edge cases in the current function, add assertions.
-                5. Call submit_test_case() with ONLY the new function.
-                """
-                self.messages.append({"role": "user", "content": step_prompt})
-                self.messages = await self.process_messages(self.messages)
-                
-                last_tool_res = ""
-                last_assistant_text = ""
-                for m in reversed(self.messages):
-                    if m.get('role') == 'tool': 
-                        last_tool_res = m.get('content', '')
-                        if "ACCEPTED" in last_tool_res or "REJECTED" in last_tool_res: break
-                    if m.get('role') == 'assistant' and m.get('content'):
-                        last_assistant_text = m['content']
-                
-                if "ACCEPTED" in last_tool_res: 
-                    fails_in_a_row = 0
-                elif "REJECTED" in last_tool_res: 
-                    fails_in_a_row += 1
-                elif "DONE" in last_assistant_text: 
-                    break
-                else: 
-                    fails_in_a_row += 1
-
-            # --- PHASE 4: Finalize Task ---
-            log_step("Phase 4: Finalizing Task")
-            self.messages.append({"role": "user", "content": "Call finalize_task()."})
-            await self.process_messages(self.messages)
+        
+        await self.process_messages(self.messages)
+        
+        # Save Trajectory File
+        os.makedirs("trajectory", exist_ok=True)
+        traj_path = os.path.join("trajectory", f"trajectory_{example_name}.txt")
+        with open(traj_path, "w") as f:
+            f.write("\n".join(self.trajectory_log))
+        print(f"Trajectory saved to {traj_path}")
 
 async def main(server_path):
     client = MCPClient()
     try:
         await client.connect_to_server(server_path)
-        await client.workflow_loop()
+        
+        # Task 3 targets only
+        targets = ["example1", "example2", "example3"]
+        
+        for target in targets:
+            await client.run_for_example(target)
+            
     finally:
         await client.cleanup()
 
