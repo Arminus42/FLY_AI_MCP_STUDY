@@ -101,8 +101,10 @@ def generate_random_inputs(sig):
     """함수 시그니처를 보고 랜덤 정수 입력 생성"""
     args = []
     for param in sig.parameters.values():
-       
-        args.append(random.randint(-100, 100))
+        if param.annotation == int:
+            args.append(random.randint(-100, 100))
+        elif param.annotation == float:
+            args.append(random.uniform(-100, 100))
     return args
 
 def mutate(args):
@@ -113,17 +115,39 @@ def mutate(args):
     new_args[idx] += change
     return new_args
 
-def run_hill_climbing(target_func, branch_id, max_iter=100):
+def run_hill_climbing(target_func, branch_id, seeds=[], max_iter=10000):
     sig = inspect.signature(target_func)
-    current_args = generate_random_inputs(sig)
     
+    # 1. 후보군 생성: (완전 랜덤 값) + (이전에 성공했던 값들)
+    candidates = [generate_random_inputs(sig)] + seeds
+    
+    current_args = None
+    best_dist = float('inf')
 
-    tracer.reset()
-    try:
-        target_func(*current_args)
-    except: pass
-    best_dist = tracer.get_distance(branch_id)
-    
+    # 2. 후보군 중 가장 유망한(거리가 짧은) 시작점 찾기
+    for args in candidates:
+        tracer.reset()
+        try:
+            target_func(*args)
+        except: pass
+        
+        dist = tracer.get_distance(branch_id)
+        
+        # 만약 이전에 성공했던 값을 넣었더니 바로 통과(거리 0)되면 즉시 반환
+        if dist == 0:
+            return args
+            
+        # 거리가 더 짧은(유망한) 값을 시작점으로 선택
+        if dist < best_dist:
+            best_dist = dist
+            current_args = args
+
+    # 만약 모든 후보가 진입조차 못했다면(inf), 그냥 랜덤값으로 진행
+    if current_args is None:
+        current_args = generate_random_inputs(sig)
+
+    # 3. 선택된 시작점에서 힐 클라이밍 시작
+    # (여기서부터는 기존 로직과 동일하지만, start point가 훨씬 좋습니다)
     if best_dist == 0:
         return current_args
 
@@ -136,7 +160,6 @@ def run_hill_climbing(target_func, branch_id, max_iter=100):
         except: pass 
         
         candidate_dist = tracer.get_distance(branch_id)
-        
         
         if candidate_dist < best_dist:
             best_dist = candidate_dist
@@ -184,7 +207,7 @@ if __name__ == "__main__":
     print(f"Target functions found: {target_functions}")
 
     generated_tests = []
-
+    population = {fname: [] for fname in target_functions}
     
     for func_name in target_functions:
         func_obj = exec_globals[func_name]
@@ -192,9 +215,12 @@ if __name__ == "__main__":
         
         for branch_id in instrumenter.branches:
 
-            result_args = run_hill_climbing(func_obj, branch_id)
+            result_args = run_hill_climbing(func_obj, branch_id, seeds=population[func_name])
             if result_args:
                 generated_tests.append((func_name, result_args))
+                if result_args not in population[func_name]:
+                    population[func_name].append(result_args)
+            
 
     unique_tests = []
     seen = set()
