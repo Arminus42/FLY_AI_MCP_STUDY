@@ -18,6 +18,7 @@ def intersect(line1_x1:int, line1_y1:int, line1_x2:int, line1_y2:int,
           if (u02 <= 1):
             return True
     return False
+    
   else:
     if u1t == 0:
       return True

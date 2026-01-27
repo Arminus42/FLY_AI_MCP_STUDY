@@ -1,4 +1,5 @@
 import asyncio
+from ntpath import exists
 from typing import Optional
 from contextlib import AsyncExitStack
 
@@ -7,7 +8,8 @@ from mcp.client.stdio import stdio_client
 
 from openai import OpenAI
 from dotenv import load_dotenv
-
+import os
+from datetime import datetime
 from openai.types.chat import (
     ChatCompletionUserMessageParam,
     ChatCompletionAssistantMessageParam,
@@ -28,12 +30,12 @@ import traceback
 
 load_dotenv()
 
-async def main(server_script_path: str, prompt: str):
+async def main(server_script_path: str):
     client = MCPClient()
 
     try:
         await client.connect_to_server(server_script_path)
-        await client.workflow_loop(prompt)
+        await client.run_sbst()
     finally:
         await client.cleanup()
 
@@ -43,7 +45,37 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.llm = OpenAI()
+        self.trajectory = []
         self.messages = []
+
+        self.result_dir = self.get_result_dir()
+
+    def save_trajectory(self, file_number: str):
+        """Save trajectory as trajectory_example#.txt in /trajectory"""
+        save_dir = './trajectory'
+        abs_path = os.path.abspath(save_dir)
+        os.makedirs(abs_path, exist_ok=True)
+
+        content = '\n'.join([f"Tool: {item['tool']}, Args: {item['args']}, Output: {item['output']}" for item in self.trajectory])
+        with open(os.path.join(abs_path, f'trajectory_example{file_number}.txt'), "w") as f:
+            f.write(content)
+
+    def get_result_dir(self):
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        result_dir = f"task3_results_{timestamp}"
+        os.makedirs(result_dir, exist_ok=True)
+        print(f"📂 Working Directory: {result_dir}")
+        return result_dir
+
+    async def excute_tools(self, tool_name: str, tool_args: dict):
+        if tool_name == "run_sbst":
+            tool_args["save_path"] = self.result_dir
+        print(f"Calling tool: {tool_name} with args: {tool_args}")
+        result = await self.session.call_tool(tool_name, tool_args)
+        output = result.content[0].text if result.content else ""
+        print(f"Tool result: {output}")
+        self.trajectory.append({'tool': tool_name, 'args': tool_args, 'output': output})
+        return result
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -73,7 +105,6 @@ class MCPClient:
 
     async def process_messages(self, messages: list[ChatCompletionMessageParam]):
         """Process a query and return the response"""
-
         response = await self.session.list_tools()
         available_tools = [ChatCompletionToolParam(
             type="function",
@@ -104,8 +135,6 @@ class MCPClient:
         elif finish_reason == "tool_calls":
             tool_calls = response.choices[0].message.tool_calls
             assert tool_calls is not None
-            for tool_call in tool_calls:
-                print(tool_call.function.name)
             messages.append(
                 ChatCompletionAssistantMessageParam(
                     role="assistant",
@@ -149,7 +178,7 @@ class MCPClient:
 
         tool_name = tool_call.function.name
         tool_args = json.loads(tool_call.function.arguments)
-        call_tool_result = await self.session.call_tool(tool_name, tool_args)
+        call_tool_result = await self.excute_tools(tool_name, tool_args)
 
         if call_tool_result.isError:
             raise ValueError(f"[ERROR] Tool call failed: {call_tool_result.content}")
@@ -170,29 +199,36 @@ class MCPClient:
             tool_call_id=tool_call.id
         )
 
-    async def workflow_loop(self, prompt:str):
+    async def run_sbst(self):
         print("Welcome to the MCP Client!")
-
-        self.messages = []
-
-        user_input = ""
-
-        self.messages.append({"role":"user", "content":user_input})
-
+        result = await self.excute_tools('list_files', {})
+        files_str = result.content[0].text if result.content else ""
         try:
-            self.messages = await self.process_messages(self.messages)
+            target_files = eval(files_str)
+        except:
+            target_files = []
+        target_files = sorted(target_files)
+        for file in target_files[:3]:
+            self.messages = []
 
-        except Exception as e:
-            print(f"Error processing user input: {e}")
-            traceback.print_exc()
+            user_input = f"Run SBST.py for {file}"
+
+            self.messages.append({"role":"user", "content":user_input})
+
+            try:
+                self.messages = await self.process_messages(self.messages)
+                self.save_trajectory(file.split('/')[-1].split('.')[0][-1])
+                self.trajectory = []
+
+            except Exception as e:
+                print(f"Error processing user input: {e}")
+                traceback.print_exc()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MCP Client for connecting to a server.")
     parser.add_argument('server_script_path', help="Path to the server script (.py or .js)", type=str)
-    parser.add_argument('prompt', type=str)
     args = parser.parse_args()
-
-    asyncio.run(main(args.server_script_path, args.prompt))
+    asyncio.run(main(args.server_script_path))
 
     pass
 

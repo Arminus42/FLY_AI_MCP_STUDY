@@ -279,11 +279,18 @@ def get_approach_level_and_distance(target_branch, target_outcome, structure):
 def generate_random_inputs(sig):
     args = []
     for param in sig.parameters.values():
+<<<<<<< HEAD
+        if param.annotation == int:
+            args.append(random.randint(-100, 100))
+        elif param.annotation == float:
+            args.append(random.uniform(-100, 100))
+=======
         # [Strategy] 넓은 초기 범위 (example5 대응)
         if random.random() < 0.5:
              args.append(random.randint(-100, 100))
         else:
              args.append(random.randint(-2000000, 2000000))
+>>>>>>> 2f0ea8adc18b4e09f7c4d655199a77cae7fec770
     return args
 
 def mutate(args):
@@ -308,6 +315,43 @@ def mutate(args):
             
     return new_args
 
+<<<<<<< HEAD
+def run_hill_climbing(target_func, branch_id, seeds=[], max_iter=10000):
+    sig = inspect.signature(target_func)
+    
+    # 1. 후보군 생성: (완전 랜덤 값) + (이전에 성공했던 값들)
+    candidates = [generate_random_inputs(sig)] + seeds
+    
+    current_args = None
+    best_dist = float('inf')
+
+    # 2. 후보군 중 가장 유망한(거리가 짧은) 시작점 찾기
+    for args in candidates:
+        tracer.reset()
+        try:
+            target_func(*args)
+        except: pass
+        
+        dist = tracer.get_distance(branch_id)
+        
+        # 만약 이전에 성공했던 값을 넣었더니 바로 통과(거리 0)되면 즉시 반환
+        if dist == 0:
+            return args
+            
+        # 거리가 더 짧은(유망한) 값을 시작점으로 선택
+        if dist < best_dist:
+            best_dist = dist
+            current_args = args
+
+    # 만약 모든 후보가 진입조차 못했다면(inf), 그냥 랜덤값으로 진행
+    if current_args is None:
+        current_args = generate_random_inputs(sig)
+
+    # 3. 선택된 시작점에서 힐 클라이밍 시작
+    # (여기서부터는 기존 로직과 동일하지만, start point가 훨씬 좋습니다)
+    if best_dist == 0:
+        return current_args
+=======
 def run_hill_climbing(target_func, branch_id, outcome, structure, timeout=2.0):
     """
     Time-Based Hill Climbing with Tuple Comparison
@@ -327,6 +371,7 @@ def run_hill_climbing(target_func, branch_id, outcome, structure, timeout=2.0):
     best_fitness = (ap, bd)
     
     if best_fitness == (0, 0.0): return current_args
+>>>>>>> 2f0ea8adc18b4e09f7c4d655199a77cae7fec770
 
     iter_count = 0
     
@@ -343,12 +388,17 @@ def run_hill_climbing(target_func, branch_id, outcome, structure, timeout=2.0):
         try: target_func(*candidate_args)
         except: pass
         
+<<<<<<< HEAD
+        if candidate_dist < best_dist:
+            best_dist = candidate_dist
+=======
         ap, bd = get_approach_level_and_distance(branch_id, outcome, structure)
         fitness = (ap, bd)
         
         # Tuple Comparison (Lexicographical)
         if fitness <= best_fitness:
             best_fitness = fitness
+>>>>>>> 2f0ea8adc18b4e09f7c4d655199a77cae7fec770
             current_args = candidate_args
             if best_fitness == (0, 0.0): return current_args
             
@@ -382,6 +432,10 @@ if __name__ == "__main__":
                        if inspect.isfunction(obj) and not name.startswith('_sbst')]
     
     generated_tests = []
+<<<<<<< HEAD
+    population = {fname: [] for fname in target_functions}
+=======
+>>>>>>> 2f0ea8adc18b4e09f7c4d655199a77cae7fec770
     
     for func_name in target_functions:
         func_obj = exec_globals[func_name]
@@ -399,6 +453,14 @@ if __name__ == "__main__":
         except: pass
         for p in tracer.path: covered_targets.add(p)
 
+<<<<<<< HEAD
+            result_args = run_hill_climbing(func_obj, branch_id, seeds=population[func_name])
+            if result_args:
+                generated_tests.append((func_name, result_args))
+                if result_args not in population[func_name]:
+                    population[func_name].append(result_args)
+            
+=======
         # 2. Targeted Search
         for (bid, outcome) in target_branches:
             if (bid, outcome) in covered_targets: continue
@@ -412,6 +474,7 @@ if __name__ == "__main__":
                 try: func_obj(*result_args)
                 except: pass
                 for p in tracer.path: covered_targets.add(p)
+>>>>>>> 2f0ea8adc18b4e09f7c4d655199a77cae7fec770
 
     unique_tests = []
     seen = set()

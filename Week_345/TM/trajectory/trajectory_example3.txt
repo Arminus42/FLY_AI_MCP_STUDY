@@ -1,0 +1,9 @@
+run_sbst
+write_file
+
+[Performance Metrics]
+Task Completed.
+- Execution Time: 17.22 sec
+- LLM Requests: 3
+- Execution Time/LLM Requests: 5.74
+- Tool Calls: 2

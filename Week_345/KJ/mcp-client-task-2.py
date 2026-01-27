@@ -33,7 +33,7 @@ async def main(server_script_path: str):
 
     try:
         await client.connect_to_server(server_script_path)
-        await client.workflow_loop("Run pytest on the test files in the targets directory.")
+        await client.workflow_loop()
     finally:
         await client.cleanup()
 
@@ -149,7 +149,6 @@ class MCPClient:
 
         tool_name = tool_call.function.name
         tool_args = json.loads(tool_call.function.arguments)
-        print(f"Calling tool: {tool_name} with args: {tool_args}")
         call_tool_result = await self.session.call_tool(tool_name, tool_args)
         if call_tool_result.isError:
             raise ValueError(f"[ERROR] Tool call failed: {call_tool_result.content}")
@@ -170,14 +169,34 @@ class MCPClient:
             tool_call_id=tool_call.id
         )
 
-    async def workflow_loop(self, user_input: str):
+    async def workflow_loop(self):
         print("Welcome to the MCP Client!")
 
         self.messages = []
+        system_prompt = """
+        You are a Senior QA Automation Engineer. Your goal is 100% code coverage.
 
-        user_input = user_input
+        ### File Permissions & Roles (CRITICAL):
+        - **Source Code (`example*.py`)**: IMMUTABLE / READ-ONLY. You simply CANNOT modify these files. They are the absolute truth.
+        - **Test Code (`test_example*.py`)**: MUTABLE / WRITE-ALLOWED. You must edit THESE files to adapt to the source code logic.
 
-        self.messages.append({"role":"user", "content":user_input})
+        ### Guidelines:
+        - Use 'run_pytest' and 'measure_coverage' iteratively to check coverage, strictly adhering to this execution sequence.
+        - If coverage is < 100% and the number of trials is < 3, analyze the 'missing_lines', 'Unexecuted Code Snippets' and modify unexecuted codes in 'test_example*.py' ONLY.
+        - When modifying a file, always provide the full code, not just the changes.
+        - Stop and save the best results upon reaching 100% coverage or 3 trials across all test files.
+        - Final output must be 'best_coverage.json' in /targets/result.
+        - Important: Use must 'import example#' style for imports.
+        """
+        user_input = """
+        Identify all Python files in /targets, measure their coverage, and perform the iterative refinement process to reach 100%.
+        """
+
+        # self.messages.append({"role":"user", "content":user_input})
+        self.messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ]
 
         try:
             self.messages = await self.process_messages(self.messages)
