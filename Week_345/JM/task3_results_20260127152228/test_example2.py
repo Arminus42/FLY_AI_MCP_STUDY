@@ -2,8 +2,8 @@ import pytest
 from example2 import *
 
 def test_testme_0():
-    testme(1003, -98309, -3998893)
+    testme(-1200398, 1115, -302088)
 
 def test_testme_1():
-    testme(63, 1680485, -29)
+    testme(991422, 1107145, -993378)
 

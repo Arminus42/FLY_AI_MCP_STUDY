@@ -9,10 +9,10 @@
    - 구현 방식: 서버 측에 'run_and_move'라는 Tool을 구현하여 통신 횟수 최소화. (기존에 구현했던 툴 통합)
    - 실험 결과: 전략 1 대비 약 25%의 추가적인 시간 단축 확인 (약 5초대 진입).
 
-3. 전략 3: 프롬프트 튜닝 
+3. 전략 3: 프롬프트 튜닝 ❎
    - 구현 방식: 시스템 프롬프트로 "설명 생략, 행동만 수행"을 강제하여 토큰 생성 시간 단축 시도.
    - 실험 결과: 오히려 전체 실행 시간이 증가함 (약 27초)
-   - 실패 원인: LLM의 추론(Reasoning) 과정을 과도하게 생략시키자, 어려운 타겟에서 오히려 재시도를 했지 않았을까 생각함.
+   - 실패 원인: LLM의 추론 과정을 과도하게 생략시키자, 어려운 타겟에서 오히려 재시도를 했지 않았을까 생각함.
    system_prompt = (
             "You are a low-latency automation bot. "
             "Your goal is to complete the task using the fewest possible steps. "
@@ -213,13 +213,9 @@ class MCPClient:
         self.print_log("Processing started (Optimized Strategy)")
         start_time = time.time()
         
-        # [최적화 전략 2: 도구 병합 프롬프트]
-        # AI에게 개별 단계(run -> move) 대신 '복합 도구(run_sbst_and_move)'를 사용하도록 강제합니다.
-        # 이를 통해 LLM과의 통신 횟수(Turn)를 줄여 실행 속도를 높입니다.
         prompt = (
-            f"Use the composite tool 'run_sbst_and_move' to run the SBST tool for '{target_file}' "
-            f"and immediately move the result to '{RESULT_DIR}'. "
-            f"Do NOT run the steps separately. Confirm when done."
+            f"Run the SBST tool for '{target_file}' and move the generated test file "
+            f"to '{RESULT_DIR}'. Confirm when done."
         )
         
         self.messages.append({"role": "user", "content": prompt})

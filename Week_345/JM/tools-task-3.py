@@ -36,7 +36,7 @@ def list_files() -> str:
 
 # [기존 도구 1] 개별 실행용 (유지)
 # 전략 2(도구 병합)를 사용하더라도, 디버깅이나 개별 제어를 위해 남겨둠
-@mcp.tool()
+# @mcp.tool()
 def run_sbst(target_relative_path: str) -> str:
     """
     [실행 도구] 지정된 대상 파일에 대해 레거시 도구인 sbst.py를 실행합니다.
@@ -70,7 +70,7 @@ def run_sbst(target_relative_path: str) -> str:
 
 # [기존 도구 2] 개별 이동용 (유지)
 # sbst.py가 결과 저장 위치를 변경할 수 없는 제약을 해결하기 위한 도구
-@mcp.tool()
+# @mcp.tool()
 def move_generated_test(target_relative_path: str, destination_dir: str) -> str:
     """
     sbst.py가 생성한 테스트 파일을 찾아 지정된 결과 폴더로 이동시킵니다.
